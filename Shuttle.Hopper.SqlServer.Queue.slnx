@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="LICENSE" />
+    <File Path="README.md" />
+  </Folder>
+  <Project Path="Shuttle.Hopper.SqlServer.Queue.Tests/Shuttle.Hopper.SqlServer.Queue.Tests.csproj" Id="7b981fbb-8142-48e3-97a6-91d86820a0d2" />
+  <Project Path="Shuttle.Hopper.SqlServer.Queue/Shuttle.Hopper.SqlServer.Queue.csproj" />
+</Solution>
