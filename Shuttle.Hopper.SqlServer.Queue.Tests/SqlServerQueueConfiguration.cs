@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Shuttle.Hopper.SqlServer.Queue.Tests;
 
@@ -12,21 +13,20 @@ public static class SqlServerQueueConfiguration
         var configuration = new ConfigurationBuilder()
             .AddUserSecrets<SqlServerQueueFixture>()
             .Build();
-        
-        services.AddSingleton<IConfiguration>(configuration);
 
-        services.AddEntityFrameworkSqlServer();
-
-        services.AddSqlServerQueue(builder =>
-        {
-            var sqlServerQueueOptions = new SqlServerQueueOptions
+        services
+            .AddSingleton<IConfiguration>(configuration)
+            .AddLogging(builder => builder.AddConsole())
+            .AddSqlServerQueue(builder =>
             {
-                ConnectionString = configuration.GetConnectionString("Hopper") ?? throw new ApplicationException("A 'ConnectionString' with name 'Hopper' is required which points to a Sql Server database where the queue tables will be stored."),
-                Schema = "QueueFixture"
-            };
+                var sqlServerQueueOptions = new SqlServerQueueOptions
+                {
+                    ConnectionString = configuration.GetConnectionString("Hopper") ?? throw new ApplicationException("A 'ConnectionString' with name 'Hopper' is required which points to a Sql Server database where the queue tables will be stored."),
+                    Schema = "QueueFixture"
+                };
 
-            builder.AddOptions("hopper", sqlServerQueueOptions);
-        });
+                builder.AddOptions("hopper", sqlServerQueueOptions);
+            });
 
         return services;
     }

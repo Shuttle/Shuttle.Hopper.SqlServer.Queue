@@ -1,15 +1,17 @@
-﻿using System.Data;
-using System.Security.Cryptography;
-using System.Text;
-using System.Transactions;
-using Microsoft.Data.SqlClient;
+﻿using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Shuttle.Core.Contract;
 using Shuttle.Core.Streams;
+using System.Data;
+using System.Diagnostics.CodeAnalysis;
+using System.Security.Cryptography;
+using System.Text;
+using System.Transactions;
 
 namespace Shuttle.Hopper.SqlServer.Queue;
 
+[SuppressMessage("Security", "EF1002:Risk of vulnerability to SQL injection", Justification = "Schema and table names are from trusted configuration sources")]
 public class SqlServerQueue : ITransport, ICreateTransport, IDeleteTransport, IPurgeTransport
 {
     private readonly SqlServerQueueDbContext _dbContext;
@@ -18,15 +20,19 @@ public class SqlServerQueue : ITransport, ICreateTransport, IDeleteTransport, IP
     private readonly SqlServerQueueOptions _sqlServerQueueOptions;
     private readonly byte[] _unacknowledgedHash = MD5.Create().ComputeHash(Encoding.ASCII.GetBytes($@"{Environment.MachineName}\\{AppDomain.CurrentDomain.BaseDirectory}"));
     private bool _initialized;
+    private readonly Type _guidType = typeof(Guid);
 
-    public SqlServerQueue(ServiceBusOptions serviceBusOptions, SqlServerQueueOptions sqlServerQueueOptions, TransportUri uri, ISqlServerQueueDbContextFactory dbContextFactory)
+    public SqlServerQueue(ServiceBusOptions serviceBusOptions, SqlServerQueueOptions sqlServerQueueOptions, TransportUri uri)
     {
         _serviceBusOptions = Guard.AgainstNull(serviceBusOptions);
         _sqlServerQueueOptions = Guard.AgainstNull(sqlServerQueueOptions);
-
         Uri = Guard.AgainstNull(uri);
 
-        _dbContext = Guard.AgainstNull(dbContextFactory).Create(_sqlServerQueueOptions, Uri.TransportName);
+        var dbContextOptions = new DbContextOptionsBuilder<SqlServerQueueDbContext>()
+            .UseSqlServer(sqlServerQueueOptions.ConnectionString)
+            .Options;
+
+        _dbContext = new(dbContextOptions);
     }
 
     public async Task CreateAsync(CancellationToken cancellationToken = default)
@@ -99,6 +105,8 @@ END
     {
         await _serviceBusOptions.TransportOperation.InvokeAsync(new(this, "[has-pending/starting]"), cancellationToken);
 
+        var result = false;
+
         await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
 
         try
@@ -108,11 +116,11 @@ END
                 await InitializeAsync(cancellationToken);
             }
 
-            var result = await _dbContext.Messages.CountAsync(cancellationToken) > 0;
+            var count = await _dbContext.Database
+                .SqlQueryRaw<int>($"SELECT COUNT(*) [Value] FROM [{_sqlServerQueueOptions.Schema}].[{Uri.TransportName}]")
+                .FirstOrDefaultAsync(cancellationToken);
 
-            await _serviceBusOptions.TransportOperation.InvokeAsync(new(this, "[has-pending]", result), cancellationToken);
-
-            return result;
+            result = count > 0;
         }
         catch (OperationCanceledException)
         {
@@ -123,12 +131,14 @@ END
             _lock.Release();
         }
 
-        return false;
+        await _serviceBusOptions.TransportOperation.InvokeAsync(new(this, "[has-pending]", result), cancellationToken);
+
+        return result;
     }
 
     public async Task AcknowledgeAsync(object acknowledgementToken, CancellationToken cancellationToken = default)
     {
-        if (Guard.AgainstNull(acknowledgementToken) is not (long sequenceId and > 0))
+        if (Guard.AgainstNull(acknowledgementToken).GetType() != _guidType)
         {
             return;
         }
@@ -142,22 +152,25 @@ END
                 await InitializeAsync(cancellationToken);
             }
 
-            await _dbContext.Database.ExecuteSqlRawAsync($"DELETE FROM [{_sqlServerQueueOptions.Schema}].[{Uri.TransportName}] WHERE SequenceId = @SequenceId", [new SqlParameter("@SequenceId", sequenceId)], cancellationToken);
-
-            await _serviceBusOptions.MessageAcknowledged.InvokeAsync(new(this, acknowledgementToken), cancellationToken);
+            await _dbContext.Database.ExecuteSqlRawAsync($"DELETE FROM [{_sqlServerQueueOptions.Schema}].[{Uri.TransportName}] WHERE UnacknowledgedId = @UnacknowledgedId", [new SqlParameter("@UnacknowledgedId", acknowledgementToken)], cancellationToken);
         }
         catch (OperationCanceledException)
         {
             await _serviceBusOptions.TransportOperation.InvokeAsync(new(this, "[acknowledge/cancelled]", false), cancellationToken);
+            throw;
         }
         finally
         {
             _lock.Release();
         }
+
+        await _serviceBusOptions.MessageAcknowledged.InvokeAsync(new(this, acknowledgementToken), cancellationToken);
     }
 
     public async Task<ReceivedMessage?> ReceiveAsync(CancellationToken cancellationToken = default)
     {
+        ReceivedMessage? receivedMessage;
+
         await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
 
         try
@@ -257,27 +270,29 @@ END;
 
             var result = new MemoryStream(message.MessageBody);
 
-            var receivedMessage = new ReceivedMessage(result, message.SequenceId);
-
-            await _serviceBusOptions.MessageReceived.InvokeAsync(new(this, receivedMessage), cancellationToken);
-
-            return receivedMessage;
+            receivedMessage = new(result, message.UnacknowledgedId!.Value);
         }
         catch (OperationCanceledException)
         {
             await _serviceBusOptions.TransportOperation.InvokeAsync(new(this, "[acknowledge/cancelled]", false), cancellationToken);
+            throw;
         }
         finally
         {
             _lock.Release();
         }
 
-        return null;
+        if (receivedMessage != null)
+        {
+            await _serviceBusOptions.MessageReceived.InvokeAsync(new(this, receivedMessage), cancellationToken);
+        }
+
+        return receivedMessage;
     }
 
     public async Task ReleaseAsync(object acknowledgementToken, CancellationToken cancellationToken = default)
     {
-        if (Guard.AgainstNull(acknowledgementToken) is not (long sequenceId and > 0))
+        if (Guard.AgainstNull(acknowledgementToken).GetType() != _guidType)
         {
             return;
         }
@@ -302,21 +317,30 @@ END;
                     transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
                 }
 
-                var message = await _dbContext.Messages
-                    .FirstOrDefaultAsync(item => item.SequenceId == sequenceId, cancellationToken);
+                var message = await _dbContext.Database
+                    .SqlQueryRaw<Message>($@"
+SELECT 
+    SequenceId, 
+    MessageId, 
+    MessageBody, 
+    UnacknowledgedHash, 
+    UnacknowledgedDate, 
+    UnacknowledgedId 
+FROM 
+    [{_sqlServerQueueOptions.Schema}].[{Uri.TransportName}] 
+WHERE 
+    UnacknowledgedId = @UnacknowledgedId
+", new SqlParameter("@UnacknowledgedId", acknowledgementToken)).FirstOrDefaultAsync(cancellationToken);
 
                 if (message == null)
                 {
                     return;
                 }
 
-                _dbContext.Messages.Remove(message);
+                await _dbContext.Database.ExecuteSqlRawAsync($"DELETE FROM [{_sqlServerQueueOptions.Schema}].[{Uri.TransportName}] WHERE UnacknowledgedId = @UnacknowledgedId", 
+                    [new SqlParameter("@UnacknowledgedId", acknowledgementToken)], cancellationToken: cancellationToken);
 
-                await _dbContext.SaveChangesAsync(cancellationToken);
-
-                var sql = $"INSERT INTO [{_sqlServerQueueOptions.Schema}].[{Uri.TransportName}] (MessageId, MessageBody) values (@MessageId, @MessageBody)";
-
-                await _dbContext.Database.ExecuteSqlRawAsync(sql,
+                await _dbContext.Database.ExecuteSqlRawAsync($"INSERT INTO [{_sqlServerQueueOptions.Schema}].[{Uri.TransportName}] (MessageId, MessageBody) values (@MessageId, @MessageBody)",
                     [
                         new SqlParameter("@MessageId", message.MessageId),
                         new SqlParameter("@MessageBody", message.MessageBody)
@@ -341,17 +365,18 @@ END;
             {
                 transaction?.Dispose();
             }
-
-            await _serviceBusOptions.MessageReleased.InvokeAsync(new(this, acknowledgementToken), cancellationToken);
         }
         catch (OperationCanceledException)
         {
             await _serviceBusOptions.TransportOperation.InvokeAsync(new(this, "[release/cancelled]"), cancellationToken);
+            throw;
         }
         finally
         {
             _lock.Release();
         }
+
+        await _serviceBusOptions.MessageReleased.InvokeAsync(new(this, acknowledgementToken), cancellationToken);
     }
 
     public async Task SendAsync(TransportMessage transportMessage, Stream stream, CancellationToken cancellationToken = default)
@@ -365,17 +390,18 @@ END;
         {
             await _dbContext.Database.ExecuteSqlRawAsync($"INSERT INTO [{_sqlServerQueueOptions.Schema}].[{Uri.TransportName}] (MessageId, MessageBody) values (@MessageId, @MessageBody)",
                 [new SqlParameter("@MessageId", transportMessage.MessageId), new SqlParameter("@MessageBody", await stream.ToBytesAsync())], cancellationToken);
-
-            await _serviceBusOptions.MessageSent.InvokeAsync(new(this, transportMessage, stream), cancellationToken);
         }
         catch (OperationCanceledException)
         {
             await _serviceBusOptions.TransportOperation.InvokeAsync(new(this, "[send/cancelled]"), cancellationToken);
+            throw;
         }
         finally
         {
             _lock.Release();
         }
+
+        await _serviceBusOptions.MessageSent.InvokeAsync(new(this, transportMessage, stream), cancellationToken);
     }
 
     public TransportType Type => TransportType.Queue;

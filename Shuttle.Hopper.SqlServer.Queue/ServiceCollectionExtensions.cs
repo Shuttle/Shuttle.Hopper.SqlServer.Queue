@@ -1,5 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Shuttle.Core.Contract;
 
@@ -27,8 +26,6 @@ public static class ServiceCollectionExtensions
             }
 
             services.AddSingleton<ITransportFactory, SqlServerQueueFactory>();
-            services.AddSingleton<IModelCacheKeyFactory, SqlServerQueueCacheKeyFactory>();
-            services.AddSingleton<ISqlServerQueueDbContextFactory, SqlServerQueueDbContextFactory>();
 
             return services;
         }
