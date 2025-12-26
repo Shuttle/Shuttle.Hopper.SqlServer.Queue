@@ -40,7 +40,7 @@ public class SqlServerQueue : ITransport, ICreateTransport, IDeleteTransport, IP
         await _dbContext.Database.ExecuteSqlRawAsync($@"
 IF NOT EXISTS (SELECT 1 FROM sys.schemas WHERE name = '{_sqlServerQueueOptions.Schema}')
 BEGIN
-    EXEC('CREATE SCHEMA {_sqlServerQueueOptions.Schema}');
+    EXEC('CREATE SCHEMA [{_sqlServerQueueOptions.Schema}]');
 END
 
 IF OBJECT_ID ('{_sqlServerQueueOptions.Schema}.{Uri.TransportName}', 'U') IS NULL 
