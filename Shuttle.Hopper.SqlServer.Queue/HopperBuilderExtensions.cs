@@ -1,16 +1,16 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
-using Shuttle.Core.Contract;
 
 namespace Shuttle.Hopper.SqlServer.Queue;
 
-public static class ServiceCollectionExtensions
+public static class HopperBuilderExtensions
 {
-    extension(IServiceCollection services)
+    extension(HopperBuilder hopperBuilder)
     {
-        public IServiceCollection AddSqlServerQueue(Action<SqlServerQueueBuilder>? builder = null)
+        public IServiceCollection UseSqlServerQueue(Action<SqlServerQueueBuilder>? builder = null)
         {
-            var sqlQueueBuilder = new SqlServerQueueBuilder(Guard.AgainstNull(services));
+            var services = hopperBuilder.Services;
+            var sqlQueueBuilder = new SqlServerQueueBuilder(services);
 
             builder?.Invoke(sqlQueueBuilder);
 

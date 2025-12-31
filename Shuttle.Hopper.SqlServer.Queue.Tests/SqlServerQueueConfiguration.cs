@@ -17,15 +17,18 @@ public static class SqlServerQueueConfiguration
         services
             .AddSingleton<IConfiguration>(configuration)
             .AddLogging(builder => builder.AddConsole())
-            .AddSqlServerQueue(builder =>
+            .AddHopper(hopperBuilder =>
             {
-                var sqlServerQueueOptions = new SqlServerQueueOptions
+                hopperBuilder.UseSqlServerQueue(builder =>
                 {
-                    ConnectionString = configuration.GetConnectionString("Hopper") ?? throw new ApplicationException("A 'ConnectionString' with name 'Hopper' is required which points to a Sql Server database where the queue tables will be stored."),
-                    Schema = "QueueFixture"
-                };
+                    var sqlServerQueueOptions = new SqlServerQueueOptions
+                    {
+                        ConnectionString = configuration.GetConnectionString("Hopper") ?? throw new ApplicationException("A 'ConnectionString' with name 'Hopper' is required which points to a Sql Server database where the queue tables will be stored."),
+                        Schema = "QueueFixture"
+                    };
 
-                builder.AddOptions("hopper", sqlServerQueueOptions);
+                    builder.AddOptions("hopper", sqlServerQueueOptions);
+                });
             });
 
         return services;

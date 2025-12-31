@@ -3,11 +3,11 @@ using Shuttle.Core.Contract;
 
 namespace Shuttle.Hopper.SqlServer.Queue;
 
-public class SqlServerQueueFactory(IOptions<ServiceBusOptions> serviceBusOptions, IOptionsMonitor<SqlServerQueueOptions> sqlServerQueueOptions)
+public class SqlServerQueueFactory(IOptions<HopperOptions> serviceBusOptions, IOptionsMonitor<SqlServerQueueOptions> sqlServerQueueOptions)
     : ITransportFactory
 {
     private readonly IOptionsMonitor<SqlServerQueueOptions> _sqlServerQueueOptions = Guard.AgainstNull(sqlServerQueueOptions);
-    private readonly ServiceBusOptions _serviceBusOptions = Guard.AgainstNull(Guard.AgainstNull(serviceBusOptions).Value);
+    private readonly HopperOptions _serviceBusOptions = Guard.AgainstNull(Guard.AgainstNull(serviceBusOptions).Value);
 
     public Task<ITransport> CreateAsync(Uri uri, CancellationToken cancellationToken = default)
     {
