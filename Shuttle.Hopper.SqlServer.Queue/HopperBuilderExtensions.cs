@@ -7,7 +7,7 @@ public static class HopperBuilderExtensions
 {
     extension(HopperBuilder hopperBuilder)
     {
-        public IServiceCollection UseSqlServerQueue(Action<SqlServerQueueBuilder>? builder = null)
+        public HopperBuilder UseSqlServerQueue(Action<SqlServerQueueBuilder>? builder = null)
         {
             var services = hopperBuilder.Services;
             var sqlQueueBuilder = new SqlServerQueueBuilder(services);
@@ -27,7 +27,7 @@ public static class HopperBuilderExtensions
 
             services.AddSingleton<ITransportFactory, SqlServerQueueFactory>();
 
-            return services;
+            return hopperBuilder;
         }
     }
 }
