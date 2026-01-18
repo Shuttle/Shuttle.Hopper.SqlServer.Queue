@@ -1,13 +1,13 @@
-﻿using Microsoft.Data.SqlClient;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Storage;
-using Shuttle.Core.Contract;
-using Shuttle.Core.Streams;
-using System.Data;
+﻿using System.Data;
 using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text;
 using System.Transactions;
+using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+using Shuttle.Core.Contract;
+using Shuttle.Core.Streams;
 
 namespace Shuttle.Hopper.SqlServer.Queue;
 
@@ -15,12 +15,12 @@ namespace Shuttle.Hopper.SqlServer.Queue;
 public class SqlServerQueue : ITransport, ICreateTransport, IDeleteTransport, IPurgeTransport
 {
     private readonly SqlServerQueueDbContext _dbContext;
+    private readonly Type _guidType = typeof(Guid);
     private readonly SemaphoreSlim _lock = new(1, 1);
     private readonly HopperOptions _serviceBusOptions;
     private readonly SqlServerQueueOptions _sqlServerQueueOptions;
     private readonly byte[] _unacknowledgedHash = MD5.Create().ComputeHash(Encoding.ASCII.GetBytes($@"{Environment.MachineName}\\{AppDomain.CurrentDomain.BaseDirectory}"));
     private bool _initialized;
-    private readonly Type _guidType = typeof(Guid);
 
     public SqlServerQueue(HopperOptions serviceBusOptions, SqlServerQueueOptions sqlServerQueueOptions, TransportUri uri)
     {
@@ -148,7 +148,9 @@ END
                 await InitializeAsync(cancellationToken);
             }
 
+            using var scope = new TransactionScope(TransactionScopeOption.Suppress, TransactionScopeAsyncFlowOption.Enabled);
             await _dbContext.Database.ExecuteSqlRawAsync($"DELETE FROM [{_sqlServerQueueOptions.Schema}].[{Uri.TransportName}] WHERE UnacknowledgedId = @UnacknowledgedId", [new SqlParameter("@UnacknowledgedId", acknowledgementToken)], cancellationToken);
+            scope.Complete();
         }
         finally
         {
@@ -171,6 +173,7 @@ END
                 await InitializeAsync(cancellationToken);
             }
 
+            using var scope = new TransactionScope(TransactionScopeOption.Suppress, TransactionScopeAsyncFlowOption.Enabled);
             var closeConnection = false;
             var connection = _dbContext.Database.GetDbConnection();
 
@@ -254,6 +257,8 @@ END;
                 }
             }
 
+            scope.Complete();
+
             if (message == null)
             {
                 return null;
@@ -298,10 +303,9 @@ END;
 
             try
             {
-                if (!isAmbientTransactionActive)
-                {
-                    transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
-                }
+                using var scope = new TransactionScope(TransactionScopeOption.Suppress, TransactionScopeAsyncFlowOption.Enabled);
+
+                transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
 
                 var message = await _dbContext.Database
                     .SqlQueryRaw<Message>($@"
@@ -323,8 +327,8 @@ WHERE
                     return;
                 }
 
-                await _dbContext.Database.ExecuteSqlRawAsync($"DELETE FROM [{_sqlServerQueueOptions.Schema}].[{Uri.TransportName}] WHERE UnacknowledgedId = @UnacknowledgedId", 
-                    [new SqlParameter("@UnacknowledgedId", acknowledgementToken)], cancellationToken: cancellationToken);
+                await _dbContext.Database.ExecuteSqlRawAsync($"DELETE FROM [{_sqlServerQueueOptions.Schema}].[{Uri.TransportName}] WHERE UnacknowledgedId = @UnacknowledgedId",
+                    [new SqlParameter("@UnacknowledgedId", acknowledgementToken)], cancellationToken);
 
                 await _dbContext.Database.ExecuteSqlRawAsync($"INSERT INTO [{_sqlServerQueueOptions.Schema}].[{Uri.TransportName}] (MessageId, MessageBody) values (@MessageId, @MessageBody)",
                     [
@@ -333,10 +337,9 @@ WHERE
                     ],
                     cancellationToken);
 
-                if (transaction != null)
-                {
-                    await transaction.CommitAsync(cancellationToken);
-                }
+                await transaction.CommitAsync(cancellationToken);
+
+                scope.Complete();
             }
             catch (Exception)
             {
@@ -369,8 +372,10 @@ WHERE
 
         try
         {
+            using var scope = new TransactionScope(TransactionScopeOption.Suppress, TransactionScopeAsyncFlowOption.Enabled);
             await _dbContext.Database.ExecuteSqlRawAsync($"INSERT INTO [{_sqlServerQueueOptions.Schema}].[{Uri.TransportName}] (MessageId, MessageBody) values (@MessageId, @MessageBody)",
                 [new SqlParameter("@MessageId", transportMessage.MessageId), new SqlParameter("@MessageBody", await stream.ToBytesAsync())], cancellationToken);
+            scope.Complete();
         }
         finally
         {
