@@ -2,26 +2,34 @@
 
 Sql Server implementation of the `ITransport` interface for use with Shuttle.Hopper.  Uses a table for each required queue.
 
+> [!IMPORTANT]
+> The implementation creates the required tables automatically (via `ICreateTransport.CreateAsync`). The database user for the endpoint will require permissions to create schemas and tables.
+
+## Installation
+
+```bash
+dotnet add package Shuttle.Hopper.SqlServer.Queue
+```
+
 ## Supported providers
 
 Currently only the `Microsoft.Data.SqlClient` provider is supported but this can be extended.  You are welcome to create an issue and assistance will be provided where able; else a pull request would be most welcome.
 
 ## Configuration
 
-TThe URI structure is `sql://configuration-name/queue-name`.
+The URI structure is `sqlserver://configuration-name/queue-name`.
 
 ```c#
-services.AddDataAccess(builder =>
+services.AddHopper(builder =>
 {
-	builder.AddConnectionString("shuttle", "Microsoft.Data.SqlClient", "server=.;database=shuttle;user id=sa;password=Pass!000");
-});
-
-services.AddSqlQueue(builder =>
-{
-	builder.AddOptions("shuttle", new SqlQueueOptions
-	{
-		ConnectionStringName = "shuttle"
-	});
+    builder.UseSqlServerQueue(sqlServerQueueBuilder =>
+    {
+        sqlServerQueueBuilder.AddOptions("shuttle", new SqlServerQueueOptions
+        {
+            ConnectionString = "server=.;database=shuttle;user id=sa;password=Pass!000;TrustServerCertificate=true",
+            Schema = "dbo"
+        });
+    });
 });
 ```
 
@@ -30,8 +38,9 @@ The default JSON settings structure is as follows:
 ```json
 {
   "Shuttle": {
-    "SqlQueue": {
-      "ConnectionStringName": "connection-string-name"
+    "SqlServerQueue": {
+      "ConnectionString": "connection-string",
+      "Schema": "dbo"
     }
   }
 }
@@ -41,4 +50,5 @@ The default JSON settings structure is as follows:
 
 | Option | Default	| Description |
 | --- | --- | --- | 
-| `ConnectionStringName` | | The name of the connection string to use.  This package makes use of [Shuttle.Core.Data](https://shuttle.github.io/shuttle-core/data/shuttle-core-data.html) for data access. |
+| `ConnectionString` | | The server connection string. |
+| `Schema` | `dbo` | The database schema to use. |
