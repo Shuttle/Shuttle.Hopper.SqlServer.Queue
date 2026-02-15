@@ -6,6 +6,8 @@ using System.Transactions;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Shuttle.Core.Contract;
 using Shuttle.Core.Streams;
 
@@ -17,13 +19,15 @@ public class SqlServerQueue : ITransport, ICreateTransport, IDeleteTransport, IP
     private readonly SqlServerQueueDbContext _dbContext;
     private readonly Type _guidType = typeof(Guid);
     private readonly SemaphoreSlim _lock = new(1, 1);
+    private readonly ILogger<SqlServerQueue> _logger;
     private readonly HopperOptions _serviceBusOptions;
     private readonly SqlServerQueueOptions _sqlServerQueueOptions;
     private readonly byte[] _unacknowledgedHash = MD5.Create().ComputeHash(Encoding.ASCII.GetBytes($@"{Environment.MachineName}\\{AppDomain.CurrentDomain.BaseDirectory}"));
     private bool _initialized;
 
-    public SqlServerQueue(HopperOptions serviceBusOptions, SqlServerQueueOptions sqlServerQueueOptions, TransportUri uri)
+    public SqlServerQueue(HopperOptions serviceBusOptions, SqlServerQueueOptions sqlServerQueueOptions, TransportUri uri, ILogger<SqlServerQueue>? logger = null)
     {
+        _logger = logger ?? NullLogger<SqlServerQueue>.Instance;
         _serviceBusOptions = Guard.AgainstNull(serviceBusOptions);
         _sqlServerQueueOptions = Guard.AgainstNull(sqlServerQueueOptions);
         Uri = Guard.AgainstNull(uri);
@@ -103,6 +107,8 @@ END
 
     public async ValueTask<bool> HasPendingAsync(CancellationToken cancellationToken = default)
     {
+        LogMessage.Operation(_logger, Uri.Uri.Scheme, Uri.TransportName, "[has-pending/starting]");
+
         await _serviceBusOptions.TransportOperation.InvokeAsync(new(this, "[has-pending/starting]"), cancellationToken);
 
         bool result;
@@ -127,6 +133,8 @@ END
             _lock.Release();
         }
 
+        LogMessage.Operation(_logger, Uri.Uri.Scheme, Uri.TransportName, "[has-pending]");
+
         await _serviceBusOptions.TransportOperation.InvokeAsync(new(this, "[has-pending]", result), cancellationToken);
 
         return result;
@@ -143,12 +151,13 @@ END
 
         try
         {
+            using var scope = new TransactionScope(TransactionScopeOption.Suppress, TransactionScopeAsyncFlowOption.Enabled);
+
             if (!_initialized)
             {
                 await InitializeAsync(cancellationToken);
             }
 
-            using var scope = new TransactionScope(TransactionScopeOption.Suppress, TransactionScopeAsyncFlowOption.Enabled);
             await _dbContext.Database.ExecuteSqlRawAsync($"DELETE FROM [{_sqlServerQueueOptions.Schema}].[{Uri.TransportName}] WHERE UnacknowledgedId = @UnacknowledgedId", [new SqlParameter("@UnacknowledgedId", acknowledgementToken)], cancellationToken);
             scope.Complete();
         }
@@ -156,6 +165,8 @@ END
         {
             _lock.Release();
         }
+
+        LogMessage.MessageAcknowledged(_logger, Uri.Uri.Scheme, Uri.TransportName);
 
         await _serviceBusOptions.MessageAcknowledged.InvokeAsync(new(this, acknowledgementToken), cancellationToken);
     }
@@ -168,12 +179,13 @@ END
 
         try
         {
+            using var scope = new TransactionScope(TransactionScopeOption.Suppress, TransactionScopeAsyncFlowOption.Enabled);
+
             if (!_initialized)
             {
                 await InitializeAsync(cancellationToken);
             }
 
-            using var scope = new TransactionScope(TransactionScopeOption.Suppress, TransactionScopeAsyncFlowOption.Enabled);
             var closeConnection = false;
             var connection = _dbContext.Database.GetDbConnection();
 
@@ -275,6 +287,8 @@ END;
 
         if (receivedMessage != null)
         {
+            LogMessage.MessageReceived(_logger, Uri.Uri.Scheme, Uri.TransportName);
+
             await _serviceBusOptions.MessageReceived.InvokeAsync(new(this, receivedMessage), cancellationToken);
         }
 
@@ -292,18 +306,16 @@ END;
 
         try
         {
-            if (!_initialized)
-            {
-                await InitializeAsync(cancellationToken);
-            }
-
-            var isAmbientTransactionActive = Transaction.Current != null;
-
             IDbContextTransaction? transaction = null;
 
             try
             {
                 using var scope = new TransactionScope(TransactionScopeOption.Suppress, TransactionScopeAsyncFlowOption.Enabled);
+
+                if (!_initialized)
+                {
+                    await InitializeAsync(cancellationToken);
+                }
 
                 transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
 
@@ -360,6 +372,8 @@ WHERE
             _lock.Release();
         }
 
+        LogMessage.MessageReleased(_logger, Uri.Uri.Scheme, Uri.TransportName);
+
         await _serviceBusOptions.MessageReleased.InvokeAsync(new(this, acknowledgementToken), cancellationToken);
     }
 
@@ -382,6 +396,8 @@ WHERE
             _lock.Release();
         }
 
+        LogMessage.MessageEnqueued(_logger, Uri.Uri.Scheme, Uri.TransportName, transportMessage.MessageType, transportMessage.MessageId);
+
         await _serviceBusOptions.MessageSent.InvokeAsync(new(this, transportMessage, stream), cancellationToken);
     }
 
@@ -390,6 +406,8 @@ WHERE
 
     private async Task InitializeAsync(CancellationToken cancellationToken)
     {
+        LogMessage.Operation(_logger, Uri.Uri.Scheme, Uri.TransportName, "[initialize/starting]");
+
         await _serviceBusOptions.TransportOperation.InvokeAsync(new(this, "[initialize/starting]"), cancellationToken);
 
         await _dbContext.Database.ExecuteSqlRawAsync($@"
@@ -407,6 +425,8 @@ WHERE
 ", [new SqlParameter("@UnacknowledgedHash", _unacknowledgedHash)], cancellationToken);
 
         _initialized = true;
+
+        LogMessage.Operation(_logger, Uri.Uri.Scheme, Uri.TransportName, "[initialize/completed]");
 
         await _serviceBusOptions.TransportOperation.InvokeAsync(new(this, "[initialize/completed]"), cancellationToken);
     }

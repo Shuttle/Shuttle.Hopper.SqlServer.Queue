@@ -1,9 +1,10 @@
-﻿using Microsoft.Extensions.Options;
+﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Shuttle.Core.Contract;
 
 namespace Shuttle.Hopper.SqlServer.Queue;
 
-public class SqlServerQueueFactory(IOptions<HopperOptions> serviceBusOptions, IOptionsMonitor<SqlServerQueueOptions> sqlServerQueueOptions)
+public class SqlServerQueueFactory(IOptions<HopperOptions> serviceBusOptions, IOptionsMonitor<SqlServerQueueOptions> sqlServerQueueOptions, ILogger<SqlServerQueue>? logger = null)
     : ITransportFactory
 {
     private readonly IOptionsMonitor<SqlServerQueueOptions> _sqlServerQueueOptions = Guard.AgainstNull(sqlServerQueueOptions);
@@ -16,7 +17,7 @@ public class SqlServerQueueFactory(IOptions<HopperOptions> serviceBusOptions, IO
 
         return sqlServerQueueOptions == null 
             ? throw new InvalidOperationException(string.Format(Hopper.Resources.TransportConfigurationNameException, transportUri.ConfigurationName)) 
-            : Task.FromResult<ITransport>(new SqlServerQueue(_serviceBusOptions, sqlServerQueueOptions, transportUri));
+            : Task.FromResult<ITransport>(new SqlServerQueue(_serviceBusOptions, sqlServerQueueOptions, transportUri, logger));
     }
 
     public string Scheme => "sqlserver";
