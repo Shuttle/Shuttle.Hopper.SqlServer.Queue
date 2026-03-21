@@ -13,7 +13,7 @@
 
   <PropertyGroup>
     <Description>Provides a Sql Server Queue implementation for use with Shuttle.Hopper.</Description>
-    <Version>21.0.1-rc1</Version>
+    <Version>21.0.1-rc2</Version>
     <PackageProjectUrl>https://github.com/Shuttle/Shuttle.Hopper.SqlServer.Queue</PackageProjectUrl>
     <RepositoryUrl>https://github.com/Shuttle/Shuttle.Hopper.SqlServer.Queue.git</RepositoryUrl>
     <PackageTags>sqlserver queue</PackageTags>
