@@ -3,19 +3,17 @@ using Shuttle.Core.Contract;
 
 namespace Shuttle.Hopper.SqlServer.Queue;
 
-public class SqlServerQueueBuilder(IServiceCollection services)
+public class SqlServerQueueBuilder()
 {
-    internal readonly Dictionary<string, SqlServerQueueOptions> SqlServerQueueOptions = new();
+    internal readonly Dictionary<string, Action<SqlServerQueueOptions>> SqlServerQueueConfigureOptions = new();
 
-    public IServiceCollection Services { get; } = Guard.AgainstNull(services);
-
-    public SqlServerQueueBuilder AddOptions(string name, SqlServerQueueOptions sqlServerQueueOptions)
+    public SqlServerQueueBuilder Configure(string name, Action<SqlServerQueueOptions> configureOptions)
     {
         Guard.AgainstEmpty(name);
-        Guard.AgainstNull(sqlServerQueueOptions);
+        Guard.AgainstNull(configureOptions);
 
-        SqlServerQueueOptions.Remove(name);
-        SqlServerQueueOptions.Add(name, sqlServerQueueOptions);
+        SqlServerQueueConfigureOptions.Remove(name);
+        SqlServerQueueConfigureOptions.Add(name, configureOptions);
 
         return this;
     }

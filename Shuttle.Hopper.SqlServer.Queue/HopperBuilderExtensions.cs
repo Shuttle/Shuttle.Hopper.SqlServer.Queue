@@ -10,18 +10,17 @@ public static class HopperBuilderExtensions
         public HopperBuilder UseSqlServerQueue(Action<SqlServerQueueBuilder>? builder = null)
         {
             var services = hopperBuilder.Services;
-            var sqlQueueBuilder = new SqlServerQueueBuilder(services);
+            var sqlQueueBuilder = new SqlServerQueueBuilder();
 
             builder?.Invoke(sqlQueueBuilder);
 
             services.AddSingleton<IValidateOptions<SqlServerQueueOptions>, SqlServerQueueOptionsValidator>();
 
-            foreach (var pair in sqlQueueBuilder.SqlServerQueueOptions)
+            foreach (var pair in sqlQueueBuilder.SqlServerQueueConfigureOptions)
             {
                 services.AddOptions<SqlServerQueueOptions>(pair.Key).Configure(options =>
                 {
-                    options.ConnectionString = pair.Value.ConnectionString;
-                    options.Schema = pair.Value.Schema;
+                    pair.Value(options);
                 });
             }
 
