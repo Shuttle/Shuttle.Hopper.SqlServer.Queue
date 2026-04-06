@@ -1,15 +1,18 @@
-﻿using System.Data;
-using System.Diagnostics.CodeAnalysis;
-using System.Security.Cryptography;
-using System.Text;
-using System.Transactions;
-using Microsoft.Data.SqlClient;
+﻿using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Shuttle.Core.Contract;
 using Shuttle.Core.Streams;
+using System.Data;
+using System.Data.Common;
+using System.Diagnostics.CodeAnalysis;
+using System.Security.Cryptography;
+using System.Text;
+using System.Transactions;
+using Shuttle.Core.Pipelines;
 
 namespace Shuttle.Hopper.SqlServer.Queue;
 
@@ -23,20 +26,23 @@ public class SqlServerQueue : ITransport, ICreateTransport, IDeleteTransport, IP
     private readonly HopperOptions _serviceBusOptions;
     private readonly SqlServerQueueOptions _sqlServerQueueOptions;
     private readonly byte[] _unacknowledgedHash = MD5.HashData(Encoding.ASCII.GetBytes($@"{Environment.MachineName}\\{AppDomain.CurrentDomain.BaseDirectory}"));
+    private readonly bool _outbox;
     private bool _initialized;
+    private readonly DbContextOptions<SqlServerQueueDbContext> _dbContextOptions;
 
-    public SqlServerQueue(HopperOptions serviceBusOptions, SqlServerQueueOptions sqlServerQueueOptions, TransportUri uri, ILogger<SqlServerQueue>? logger = null)
+    public SqlServerQueue(HopperOptions hopperOptions, SqlServerQueueOptions sqlServerQueueOptions, TransportUri uri, ILogger<SqlServerQueue>? logger = null)
     {
         _logger = logger ?? NullLogger<SqlServerQueue>.Instance;
-        _serviceBusOptions = Guard.AgainstNull(serviceBusOptions);
+        _serviceBusOptions = Guard.AgainstNull(hopperOptions);
         _sqlServerQueueOptions = Guard.AgainstNull(sqlServerQueueOptions);
         Uri = Guard.AgainstNull(uri);
 
-        var dbContextOptions = new DbContextOptionsBuilder<SqlServerQueueDbContext>()
+        _dbContextOptions = new DbContextOptionsBuilder<SqlServerQueueDbContext>()
             .UseSqlServer(sqlServerQueueOptions.ConnectionString)
             .Options;
 
-        _dbContext = new(dbContextOptions);
+        _outbox = hopperOptions.Outbox.WorkTransportUri is not null && hopperOptions.Outbox.WorkTransportUri.Equals(uri.Uri);
+        _dbContext = new(_dbContextOptions);
     }
 
     public async Task CreateAsync(CancellationToken cancellationToken = default)
@@ -377,19 +383,31 @@ WHERE
         await _serviceBusOptions.MessageReleased.InvokeAsync(new(this, acknowledgementToken), cancellationToken);
     }
 
-    public async Task SendAsync(TransportMessage transportMessage, Stream stream, CancellationToken cancellationToken = default)
+    public async Task SendAsync(Stream stream, IState state, CancellationToken cancellationToken = default)
     {
-        Guard.AgainstNull(transportMessage);
         Guard.AgainstNull(stream);
+        
+        var transportMessage = Guard.AgainstNull(Guard.AgainstNull(state).GetTransportMessage());
+        var sqlTransaction = state.Get<SqlTransaction>(StateKeys.SqlTransaction);
 
         await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
 
         try
         {
-            using var scope = new TransactionScope(TransactionScopeOption.Suppress, TransactionScopeAsyncFlowOption.Enabled);
-            await _dbContext.Database.ExecuteSqlRawAsync($"INSERT INTO [{_sqlServerQueueOptions.Schema}].[{Uri.TransportName}] (MessageId, MessageBody) values (@MessageId, @MessageBody)",
-                [new SqlParameter("@MessageId", transportMessage.MessageId), new SqlParameter("@MessageBody", await stream.ToBytesAsync())], cancellationToken);
-            scope.Complete();
+            if (!_outbox || sqlTransaction == null)
+            {
+                using var scope = new TransactionScope(TransactionScopeOption.Suppress, TransactionScopeAsyncFlowOption.Enabled);
+                await InsertMessage();
+                scope.Complete();
+            }
+            else
+            {
+                var dbContext = new SqlServerQueueDbContext(_dbContextOptions);
+
+                await dbContext.Database.UseTransactionAsync(sqlTransaction, cancellationToken: cancellationToken);
+
+                await InsertMessage();
+            }
         }
         finally
         {
@@ -399,6 +417,13 @@ WHERE
         LogMessage.MessageEnqueued(_logger, Uri.Uri.Scheme, Uri.TransportName, transportMessage.MessageType, transportMessage.MessageId);
 
         await _serviceBusOptions.MessageSent.InvokeAsync(new(this, transportMessage, stream), cancellationToken);
+        return;
+
+        async Task InsertMessage()
+        {
+            await _dbContext.Database.ExecuteSqlRawAsync($"INSERT INTO [{_sqlServerQueueOptions.Schema}].[{Uri.TransportName}] (MessageId, MessageBody) values (@MessageId, @MessageBody)",
+                [new SqlParameter("@MessageId", transportMessage.MessageId), new SqlParameter("@MessageBody", await stream.ToBytesAsync())], cancellationToken);
+        }
     }
 
     public TransportType Type => TransportType.Queue;

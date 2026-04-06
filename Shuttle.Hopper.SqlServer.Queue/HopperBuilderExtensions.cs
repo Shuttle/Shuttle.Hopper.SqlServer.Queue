@@ -10,7 +10,7 @@ public static class HopperBuilderExtensions
         public HopperBuilder UseSqlServerQueue(Action<SqlServerQueueBuilder>? builder = null)
         {
             var services = hopperBuilder.Services;
-            var sqlQueueBuilder = new SqlServerQueueBuilder();
+            var sqlQueueBuilder = new SqlServerQueueBuilder(services);
 
             builder?.Invoke(sqlQueueBuilder);
 
