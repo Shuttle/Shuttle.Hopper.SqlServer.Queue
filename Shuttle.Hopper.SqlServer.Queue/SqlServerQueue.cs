@@ -22,7 +22,7 @@ public class SqlServerQueue : ITransport, ICreateTransport, IDeleteTransport, IP
     private readonly ILogger<SqlServerQueue> _logger;
     private readonly HopperOptions _serviceBusOptions;
     private readonly SqlServerQueueOptions _sqlServerQueueOptions;
-    private readonly byte[] _unacknowledgedHash = MD5.Create().ComputeHash(Encoding.ASCII.GetBytes($@"{Environment.MachineName}\\{AppDomain.CurrentDomain.BaseDirectory}"));
+    private readonly byte[] _unacknowledgedHash = MD5.HashData(Encoding.ASCII.GetBytes($@"{Environment.MachineName}\\{AppDomain.CurrentDomain.BaseDirectory}"));
     private bool _initialized;
 
     public SqlServerQueue(HopperOptions serviceBusOptions, SqlServerQueueOptions sqlServerQueueOptions, TransportUri uri, ILogger<SqlServerQueue>? logger = null)

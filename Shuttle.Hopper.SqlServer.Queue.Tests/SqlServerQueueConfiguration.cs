@@ -1,6 +1,5 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 
 namespace Shuttle.Hopper.SqlServer.Queue.Tests;
 
@@ -16,7 +15,6 @@ public static class SqlServerQueueConfiguration
 
         services
             .AddSingleton<IConfiguration>(configuration)
-            .AddLogging(builder => builder.AddConsole())
             .AddHopper()
             .UseSqlServerQueue(builder =>
             {

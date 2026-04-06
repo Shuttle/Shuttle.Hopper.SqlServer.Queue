@@ -8,7 +8,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.5" />
-    <ProjectReference Include="..\..\Shuttle.Hopper\Shuttle.Hopper\Shuttle.Hopper.csproj" />
+    <PackageReference Include="Shuttle.Hopper" Version="21.0.1-rc3" />
   </ItemGroup>
 
   <PropertyGroup>
