@@ -10,7 +10,7 @@ public class OutboxObserver<TDbContext>(TDbContext dbContext) : IPipelineObserve
         ArgumentNullException.ThrowIfNull(dbContext);
         ArgumentNullException.ThrowIfNull(pipelineContext);
 
-        pipelineContext.Pipeline.State.Add(StateKeys.SqlTransaction, dbContext.Database.CurrentTransaction);
+        pipelineContext.Pipeline.State.Add(StateKeys.DbContextTransaction, dbContext.Database.CurrentTransaction);
 
         return Task.CompletedTask;
     }

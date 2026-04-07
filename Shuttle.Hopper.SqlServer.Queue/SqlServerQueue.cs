@@ -388,25 +388,27 @@ WHERE
         Guard.AgainstNull(stream);
         
         var transportMessage = Guard.AgainstNull(Guard.AgainstNull(state).GetTransportMessage());
-        var sqlTransaction = state.Get<SqlTransaction>(StateKeys.SqlTransaction);
+        var dbContextTransaction = state.Get<IDbContextTransaction>(StateKeys.DbContextTransaction);
 
         await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
 
         try
         {
-            if (!_outbox || sqlTransaction == null)
+            if (!_outbox || dbContextTransaction == null)
             {
                 using var scope = new TransactionScope(TransactionScopeOption.Suppress, TransactionScopeAsyncFlowOption.Enabled);
-                await InsertMessage();
+                await InsertMessage(_dbContext);
                 scope.Complete();
             }
             else
             {
-                var dbContext = new SqlServerQueueDbContext(_dbContextOptions);
+                var dbContext = new SqlServerQueueDbContext(new DbContextOptionsBuilder<SqlServerQueueDbContext>()
+                    .UseSqlServer(dbContextTransaction.GetDbTransaction().Connection!)
+                    .Options);
 
-                await dbContext.Database.UseTransactionAsync(sqlTransaction, cancellationToken: cancellationToken);
+                await dbContext.Database.UseTransactionAsync(dbContextTransaction.GetDbTransaction(), cancellationToken: cancellationToken);
 
-                await InsertMessage();
+                await InsertMessage(dbContext);
             }
         }
         finally
@@ -419,9 +421,9 @@ WHERE
         await _serviceBusOptions.MessageSent.InvokeAsync(new(this, transportMessage, stream), cancellationToken);
         return;
 
-        async Task InsertMessage()
+        async Task InsertMessage(SqlServerQueueDbContext dbContext)
         {
-            await _dbContext.Database.ExecuteSqlRawAsync($"INSERT INTO [{_sqlServerQueueOptions.Schema}].[{Uri.TransportName}] (MessageId, MessageBody) values (@MessageId, @MessageBody)",
+            await dbContext.Database.ExecuteSqlRawAsync($"INSERT INTO [{_sqlServerQueueOptions.Schema}].[{Uri.TransportName}] (MessageId, MessageBody) values (@MessageId, @MessageBody)",
                 [new SqlParameter("@MessageId", transportMessage.MessageId), new SqlParameter("@MessageBody", await stream.ToBytesAsync())], cancellationToken);
         }
     }

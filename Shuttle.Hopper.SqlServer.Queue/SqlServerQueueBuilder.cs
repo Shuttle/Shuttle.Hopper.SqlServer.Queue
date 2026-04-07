@@ -25,7 +25,10 @@ public class SqlServerQueueBuilder(IServiceCollection services)
 
     public SqlServerQueueBuilder UseOutboxDbContext<TDbContext>() where TDbContext : DbContext
     {
-        Services.AddHostedService<OutboxHostedService<TDbContext>>();
+        Services
+            .AddScoped<OutboxObserver<TDbContext>>()
+            .AddHostedService<OutboxHostedService<TDbContext>>();
+
 
         return this;
     }

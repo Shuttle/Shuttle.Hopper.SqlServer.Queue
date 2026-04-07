@@ -2,5 +2,5 @@
 
 public static class StateKeys
 {
-    public const string SqlTransaction = "Shuttle.Hopper.SqlServer.Queue.Outbox.SqlTransaction";
+    public const string DbContextTransaction = "Shuttle.Hopper.SqlServer.Queue.Outbox.DbContextTransaction";
 }

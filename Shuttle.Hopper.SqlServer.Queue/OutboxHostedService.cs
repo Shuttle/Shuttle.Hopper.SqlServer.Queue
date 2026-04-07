@@ -7,6 +7,8 @@ namespace Shuttle.Hopper.SqlServer.Queue;
 
 public class OutboxHostedService<TDbContext>(IOptions<PipelineOptions> pipelineOptions) : IHostedService where TDbContext : DbContext
 {
+    private readonly Type _dispatchTransportMessagePipelineType = typeof(DispatchTransportMessagePipeline);
+
     public Task StartAsync(CancellationToken cancellationToken)
     {
         pipelineOptions.Value.PipelineStarting += PipelineStarting;
@@ -16,9 +18,9 @@ public class OutboxHostedService<TDbContext>(IOptions<PipelineOptions> pipelineO
 
     private Task PipelineStarting(PipelineEventArgs eventArgs, CancellationToken cancellationToken)
     {
-        if (eventArgs.Pipeline.GetType() == typeof(OutboxPipeline))
+        if (eventArgs.Pipeline.GetType() == _dispatchTransportMessagePipelineType)
         {
-            eventArgs.Pipeline.GetStage("Dispatch").BeforeEvent<DispatchTransportMessage>().Add<OutboxGetTransaction>();
+            eventArgs.Pipeline.GetStage("Send").BeforeEvent<DispatchTransportMessage>().Add<OutboxGetTransaction>();
             eventArgs.Pipeline.AddObserver<OutboxObserver<TDbContext>>();
         }
 
