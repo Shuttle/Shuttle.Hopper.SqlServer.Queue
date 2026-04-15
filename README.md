@@ -20,17 +20,28 @@ Currently only the `Microsoft.Data.SqlClient` provider is supported but this can
 The URI structure is `sqlserver://configuration-name/queue-name`.
 
 ```c#
-services.AddHopper(builder =>
-{
-    builder.UseSqlServerQueue(sqlServerQueueBuilder =>
+services.AddHopper()
+    .UseSqlServerQueue(builder =>
     {
-        sqlServerQueueBuilder.AddOptions("shuttle", new SqlServerQueueOptions
+        builder.Configure("shuttle", options =>
         {
-            ConnectionString = "server=.;database=shuttle;user id=sa;password=Pass!000;TrustServerCertificate=true",
-            Schema = "dbo"
+            options.ConnectionString = "server=.;database=shuttle;user id=sa;password=Pass!000;TrustServerCertificate=true";
+            options.Schema = "dbo";
         });
     });
-});
+```
+
+### Outbox Support
+
+To enable outbox support for transactional message processing, use the `UseOutboxDbContext<TDbContext>()` method:
+
+```c#
+services.AddHopper()
+    .UseSqlServerQueue(builder =>
+    {
+        builder.Configure("shuttle", options => { /* ... */ })
+            .UseOutboxDbContext<YourDbContext>();
+    });
 ```
 
 The default JSON settings structure is as follows:
@@ -52,3 +63,4 @@ The default JSON settings structure is as follows:
 | --- | --- | --- | 
 | `ConnectionString` | | The server connection string. |
 | `Schema` | `dbo` | The database schema to use. |
+| `GetOutboxTransactionAsync` | `null` | Optional delegate to obtain an outbox transaction for transactional message processing. |
