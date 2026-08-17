@@ -146,7 +146,7 @@ END
         return result;
     }
 
-    public async Task AcknowledgeAsync(object acknowledgementToken, CancellationToken cancellationToken = default)
+    public async Task AcknowledgeAsync(object acknowledgementToken, IPipeline pipeline, CancellationToken cancellationToken = default)
     {
         if (Guard.AgainstNull(acknowledgementToken).GetType() != _guidType)
         {
@@ -174,10 +174,10 @@ END
 
         LogMessage.MessageAcknowledged(_logger, Uri.Uri.Scheme, Uri.TransportName);
 
-        await _serviceBusOptions.MessageAcknowledged.InvokeAsync(new(this, acknowledgementToken), cancellationToken);
+        await _serviceBusOptions.MessageAcknowledged.InvokeAsync(new(this, acknowledgementToken, pipeline), cancellationToken);
     }
 
-    public async Task<ReceivedMessage?> ReceiveAsync(CancellationToken cancellationToken = default)
+    public async Task<ReceivedMessage?> ReceiveAsync(IPipeline pipeline, CancellationToken cancellationToken = default)
     {
         ReceivedMessage? receivedMessage;
 
@@ -295,13 +295,13 @@ END;
         {
             LogMessage.MessageReceived(_logger, Uri.Uri.Scheme, Uri.TransportName);
 
-            await _serviceBusOptions.MessageReceived.InvokeAsync(new(this, receivedMessage), cancellationToken);
+            await _serviceBusOptions.MessageReceived.InvokeAsync(new(this, receivedMessage, pipeline), cancellationToken);
         }
 
         return receivedMessage;
     }
 
-    public async Task ReleaseAsync(object acknowledgementToken, CancellationToken cancellationToken = default)
+    public async Task ReleaseAsync(object acknowledgementToken, IPipeline pipeline, CancellationToken cancellationToken = default)
     {
         if (Guard.AgainstNull(acknowledgementToken).GetType() != _guidType)
         {
@@ -380,15 +380,15 @@ WHERE
 
         LogMessage.MessageReleased(_logger, Uri.Uri.Scheme, Uri.TransportName);
 
-        await _serviceBusOptions.MessageReleased.InvokeAsync(new(this, acknowledgementToken), cancellationToken);
+        await _serviceBusOptions.MessageReleased.InvokeAsync(new(this, acknowledgementToken, pipeline), cancellationToken);
     }
 
-    public async Task SendAsync(Stream stream, IState state, CancellationToken cancellationToken = default)
+    public async Task SendAsync(Stream stream, IPipeline pipeline, CancellationToken cancellationToken = default)
     {
         Guard.AgainstNull(stream);
-        
-        var transportMessage = Guard.AgainstNull(Guard.AgainstNull(state).GetTransportMessage());
-        var dbContextTransaction = state.Get<IDbContextTransaction>(StateKeys.DbContextTransaction);
+
+        var transportMessage = Guard.AgainstNull(Guard.AgainstNull(pipeline).State.GetTransportMessage());
+        var dbContextTransaction = pipeline.State.Get<IDbContextTransaction>(StateKeys.DbContextTransaction);
 
         await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
 
@@ -418,7 +418,7 @@ WHERE
 
         LogMessage.MessageEnqueued(_logger, Uri.Uri.Scheme, Uri.TransportName, transportMessage.MessageType, transportMessage.MessageId);
 
-        await _serviceBusOptions.MessageSent.InvokeAsync(new(this, transportMessage, stream), cancellationToken);
+        await _serviceBusOptions.MessageSent.InvokeAsync(new(this, stream, pipeline), cancellationToken);
         return;
 
         async Task InsertMessage(SqlServerQueueDbContext dbContext)
